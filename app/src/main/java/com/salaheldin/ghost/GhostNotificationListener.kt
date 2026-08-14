@@ -23,7 +23,6 @@ class GhostNotificationListener : NotificationListenerService() {
 
         if (sbn.packageName != WHATSAPP_PACKAGE) return
 
-        // Skip the app-level "X messages from Y chats" summary notification
         val isGroupSummary = (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0
         if (isGroupSummary) return
 
@@ -31,16 +30,28 @@ class GhostNotificationListener : NotificationListenerService() {
             .extractMessagingStyleFromNotification(sbn.notification)
 
         if (messagingStyle != null) {
+            val isGroup = messagingStyle.isGroupConversation
+            val conversationName = if (isGroup) {
+                val rawTitle = messagingStyle.conversationTitle?.toString() ?: "Unknown Group"
+                rawTitle.replace(Regex("\\s*\\(\\d+\\s*messages?\\)\\s*$"), "").trim()
+            } else {
+                messagingStyle.messages.lastOrNull()?.person?.name?.toString() ?: "Unknown"
+            }
+
             for (message in messagingStyle.messages) {
-                val sender = message.person?.name?.toString()
-                    ?: messagingStyle.conversationTitle?.toString()
-                    ?: "Unknown"
+                val sender = message.person?.name?.toString() ?: conversationName
                 val text = message.text?.toString() ?: ""
                 val timestamp = message.timestamp
 
-                Log.d(TAG, "[MessagingStyle] Sender: $sender | Text: $text | Time: $timestamp")
+                Log.d(TAG, "[MessagingStyle] Group: $isGroup | Conversation: $conversationName | Sender: $sender | Text: $text")
 
-                saveMessage(sender, text, timestamp)
+                saveMessage(
+                    conversationKey = conversationName,
+                    isGroup = isGroup,
+                    sender = sender,
+                    content = text,
+                    timestamp = timestamp
+                )
             }
         } else {
             val extras = sbn.notification.extras
@@ -49,22 +60,63 @@ class GhostNotificationListener : NotificationListenerService() {
 
             Log.d(TAG, "[Fallback] Title: $title | Text: $text")
 
-            saveMessage(title, text, sbn.postTime)
+            saveMessage(
+                conversationKey = title,
+                isGroup = false,
+                sender = title,
+                content = text,
+                timestamp = sbn.postTime
+            )
         }
     }
 
-    private fun saveMessage(sender: String, content: String, timestamp: Long) {
+    private fun saveMessage(
+        conversationKey: String,
+        isGroup: Boolean,
+        sender: String,
+        content: String,
+        timestamp: Long
+    ) {
         if (content.isBlank()) return
 
         serviceScope.launch {
             val db = AppDatabase.getInstance(applicationContext)
+
+            var conversation = db.conversationDao().findByContact(conversationKey)
+            if (conversation == null) {
+                db.conversationDao().insert(
+                    ConversationEntity(
+                        contactIdentifier = conversationKey,
+                        isGroup = isGroup,
+                        lastMessage = content,
+                        lastMessageTime = timestamp,
+                        status = "WAITING_FOR_REPLY"
+                    )
+                )
+                conversation = db.conversationDao().findByContact(conversationKey)
+            } else {
+                db.conversationDao().update(
+                    conversation.copy(
+                        lastMessage = content,
+                        lastMessageTime = timestamp,
+                        status = "WAITING_FOR_REPLY",
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+
             val rowId = db.messageDao().insert(
-                MessageEntity(sender = sender, content = content, timestamp = timestamp)
+                MessageEntity(
+                    conversationId = conversation?.id ?: 0,
+                    sender = sender,
+                    content = content,
+                    timestamp = timestamp
+                )
             )
             if (rowId == -1L) {
                 Log.d(TAG, "Duplicate skipped: $sender | $content")
             } else {
-                Log.d(TAG, "Saved to DB: $sender | $content")
+                Log.d(TAG, "Saved to DB: $sender | $content (conversation: ${conversation?.id})")
             }
         }
     }
