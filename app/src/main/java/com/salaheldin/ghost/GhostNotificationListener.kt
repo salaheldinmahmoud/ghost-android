@@ -79,27 +79,50 @@ class GhostNotificationListener : NotificationListenerService() {
     ) {
         if (content.isBlank()) return
 
+        val classification = MessageClassifier.classify(content)
+
         serviceScope.launch {
             val db = AppDatabase.getInstance(applicationContext)
 
             var conversation = db.conversationDao().findByContact(conversationKey)
+
             if (conversation == null) {
+                // Brand-new conversation: only start it as "waiting" if this first
+                // message actually warrants a reply. A sticker/reaction as someone's
+                // very first message shouldn't open a waiting conversation.
+                val initialStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
+                    "NEW"
+                } else {
+                    "WAITING_FOR_REPLY"
+                }
+
                 db.conversationDao().insert(
                     ConversationEntity(
                         contactIdentifier = conversationKey,
                         isGroup = isGroup,
                         lastMessage = content,
                         lastMessageTime = timestamp,
-                        status = "WAITING_FOR_REPLY"
+                        status = initialStatus,
+                        priority = classification.priority.name
                     )
                 )
                 conversation = db.conversationDao().findByContact(conversationKey)
             } else {
+                // Existing conversation: only flip to "waiting" if this new message
+                // actually requires a reply. A low-signal message (sticker, "lol")
+                // should NOT reopen or reset an already-resolved conversation's status.
+                val updatedStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
+                    conversation.status
+                } else {
+                    "WAITING_FOR_REPLY"
+                }
+
                 db.conversationDao().update(
                     conversation.copy(
                         lastMessage = content,
                         lastMessageTime = timestamp,
-                        status = "WAITING_FOR_REPLY",
+                        status = updatedStatus,
+                        priority = classification.priority.name,
                         updatedAt = System.currentTimeMillis()
                     )
                 )
@@ -110,13 +133,15 @@ class GhostNotificationListener : NotificationListenerService() {
                     conversationId = conversation?.id ?: 0,
                     sender = sender,
                     content = content,
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    requiresReply = classification.requirement.name,
+                    priority = classification.priority.name
                 )
             )
             if (rowId == -1L) {
                 Log.d(TAG, "Duplicate skipped: $sender | $content")
             } else {
-                Log.d(TAG, "Saved to DB: $sender | $content (conversation: ${conversation?.id})")
+                Log.d(TAG, "Saved to DB: $sender | $content | ${classification.requirement} (${classification.priority}) | status: (conversation: ${conversation?.id})")
             }
         }
     }

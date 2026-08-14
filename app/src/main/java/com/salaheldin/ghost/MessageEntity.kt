@@ -15,5 +15,7 @@ data class MessageEntity(
     val content: String,
     val timestamp: Long,
     val platform: String = "whatsapp",
+    val requiresReply: String = "POSSIBLY_REQUIRES_REPLY",
+    val priority: String = "MEDIUM",
     val insertedAt: Long = System.currentTimeMillis()
 )

@@ -16,6 +16,7 @@ data class ConversationEntity(
     val lastMessage: String = "",
     val lastMessageTime: Long = 0,
     val status: String = "NEW",
+    val priority: String = "MEDIUM",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
