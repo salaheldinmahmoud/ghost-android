@@ -58,6 +58,11 @@ class GhostNotificationListener : NotificationListenerService() {
             val title = extras.getString("android.title") ?: ""
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
+            // Skip WhatsApp's own system/status notifications (e.g. "Checking for
+            // new messages"), which aren't real conversations and shouldn't be
+            // saved as if "WhatsApp" itself were a contact.
+            if (title.equals("WhatsApp", ignoreCase = true)) return
+
             Log.d(TAG, "[Fallback] Title: $title | Text: $text")
 
             saveMessage(
