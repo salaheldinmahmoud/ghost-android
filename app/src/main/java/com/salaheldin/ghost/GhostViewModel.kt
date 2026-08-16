@@ -3,10 +3,12 @@ package com.salaheldin.ghost
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class GhostViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -17,7 +19,7 @@ class GhostViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
+            initialValue = emptyList(),
         )
 
     fun markAsReplied(conversation: ConversationEntity) {
@@ -42,24 +44,14 @@ class GhostViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
-    suspend fun getRiskAssessment(conversation: ConversationEntity): RiskAssessment {
-        val events = db.responseEventDao().getEventsForConversation(conversation.id)
-        val baseline = BaselineCalculator.calculate(events)
 
-        val currentWaitMs = if (conversation.status == "WAITING_FOR_REPLY") {
-            System.currentTimeMillis() - conversation.lastMessageTime
-        } else {
-            0
-        }
+    data class RowInfo(
+        val baseline: BaselineCalculator.Baseline,
+        val isUnusual: Boolean?,
+        val risk: RiskAssessment
+    )
 
-        val latestMessage = db.messageDao().getLatestMessage(conversation.id)
-        val requirement = latestMessage?.requiresReply
-            ?.let { ReplyRequirement.valueOf(it) }
-            ?: ReplyRequirement.POSSIBLY_REQUIRES_REPLY
-
-        return RiskScoreCalculator.assess(conversation, baseline, currentWaitMs, requirement)
-    }
-    suspend fun getDelayInfo(conversation: ConversationEntity): Pair<BaselineCalculator.Baseline, Boolean?> {
+    suspend fun getRowInfo(conversation: ConversationEntity): RowInfo {
         val events = db.responseEventDao().getEventsForConversation(conversation.id)
         val baseline = BaselineCalculator.calculate(events)
 
@@ -70,6 +62,53 @@ class GhostViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val isUnusual = BaselineCalculator.checkUnusualDelay(baseline, currentWaitMs)
-        return baseline to isUnusual
+
+        val latestMessage = db.messageDao().getLatestMessage(conversation.id)
+        val requirement = latestMessage?.requiresReply
+            ?.let { ReplyRequirement.valueOf(it) }
+            ?: ReplyRequirement.POSSIBLY_REQUIRES_REPLY
+
+        val risk = RiskScoreCalculator.assess(conversation, baseline, currentWaitMs, requirement)
+
+        return RowInfo(baseline, isUnusual, risk)
+    }
+
+    fun getMessagesFlow(conversationId: Long) = db.messageDao().getMessagesForConversation(conversationId)
+
+    fun deleteAllData() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                db.clearAllTables()
+            }
+        }
+    }
+
+    data class Statistics(
+        val totalMessages: Int,
+        val repliesNeeded: Int,
+        val repliesCompleted: Int,
+        val responseRatePercent: Int,
+        val averageResponseTimeMs: Long
+    )
+
+    suspend fun getStatistics(): Statistics {
+        val totalMessages = db.messageDao().getTotalMessageCount()
+        val repliesNeeded = db.messageDao().getRepliesNeededCount()
+        val repliesCompleted = db.conversationDao().getRepliedCount()
+        val avgResponseTime = db.responseEventDao().getAverageResponseTimeMs() ?: 0L
+
+        val responseRate = if (repliesNeeded > 0) {
+            ((repliesCompleted.toFloat() / repliesNeeded.toFloat()) * 100).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+
+        return Statistics(
+            totalMessages = totalMessages,
+            repliesNeeded = repliesNeeded,
+            repliesCompleted = repliesCompleted,
+            responseRatePercent = responseRate,
+            averageResponseTimeMs = avgResponseTime
+        )
     }
 }

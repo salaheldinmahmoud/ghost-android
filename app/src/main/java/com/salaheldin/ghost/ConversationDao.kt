@@ -21,4 +21,7 @@ interface ConversationDao {
 
     @Query("SELECT * FROM conversations ORDER BY lastMessageTime DESC")
     fun getAllConversations(): Flow<List<ConversationEntity>>
+
+    @Query("SELECT COUNT(*) FROM conversations WHERE status = 'REPLIED'")
+    suspend fun getRepliedCount(): Int
 }

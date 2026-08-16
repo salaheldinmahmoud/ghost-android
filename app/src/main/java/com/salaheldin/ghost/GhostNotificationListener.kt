@@ -13,7 +13,17 @@ class GhostNotificationListener : NotificationListenerService() {
 
     companion object {
         private const val TAG = "GhostListener"
-        private const val WHATSAPP_PACKAGE = "com.whatsapp"
+
+        // Supported platforms: package name -> display name
+        private val SUPPORTED_PACKAGES = mapOf(
+            "com.whatsapp" to "WhatsApp",
+            "org.telegram.messenger" to "Telegram",
+            "com.instagram.android" to "Instagram",
+            "com.facebook.orca" to "Messenger",
+            // SMS: cover both common default apps, since it varies by phone
+            "com.google.android.apps.messaging" to "SMS",
+            "com.samsung.android.messaging" to "SMS"
+        )
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -21,7 +31,7 @@ class GhostNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
 
-        if (sbn.packageName != WHATSAPP_PACKAGE) return
+        val platform = SUPPORTED_PACKAGES[sbn.packageName] ?: return
 
         val isGroupSummary = (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0
         if (isGroupSummary) return
@@ -33,6 +43,7 @@ class GhostNotificationListener : NotificationListenerService() {
             val isGroup = messagingStyle.isGroupConversation
             val conversationName = if (isGroup) {
                 val rawTitle = messagingStyle.conversationTitle?.toString() ?: "Unknown Group"
+                // Strip WhatsApp-style trailing unread counts, e.g. "Test (4 messages)"
                 rawTitle.replace(Regex("\\s*\\(\\d+\\s*messages?\\)\\s*$"), "").trim()
             } else {
                 messagingStyle.messages.lastOrNull()?.person?.name?.toString() ?: "Unknown"
@@ -43,10 +54,12 @@ class GhostNotificationListener : NotificationListenerService() {
                 val text = message.text?.toString() ?: ""
                 val timestamp = message.timestamp
 
-                Log.d(TAG, "[MessagingStyle] Group: $isGroup | Conversation: $conversationName | Sender: $sender | Text: $text")
+                Log.d(TAG, "[$platform][MessagingStyle] Group: $isGroup | Conversation: $conversationName | Sender: $sender | Text: $text")
 
                 saveMessage(
-                    conversationKey = conversationName,
+                    platform = platform,
+                    conversationKey = "$platform:$conversationName",
+                    displayName = conversationName,
                     isGroup = isGroup,
                     sender = sender,
                     content = text,
@@ -58,15 +71,17 @@ class GhostNotificationListener : NotificationListenerService() {
             val title = extras.getString("android.title") ?: ""
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
-            // Skip WhatsApp's own system/status notifications (e.g. "Checking for
-            // new messages"), which aren't real conversations and shouldn't be
-            // saved as if "WhatsApp" itself were a contact.
-            if (title.equals("WhatsApp", ignoreCase = true)) return
+            // Skip the app's own system/status notifications (e.g. WhatsApp's
+            // "Checking for new messages", or similar for other platforms) —
+            // these aren't real conversations, just the app's own name as the title.
+            if (title.equals(platform, ignoreCase = true)) return
 
-            Log.d(TAG, "[Fallback] Title: $title | Text: $text")
+            Log.d(TAG, "[$platform][Fallback] Title: $title | Text: $text")
 
             saveMessage(
-                conversationKey = title,
+                platform = platform,
+                conversationKey = "$platform:$title",
+                displayName = title,
                 isGroup = false,
                 sender = title,
                 content = text,
@@ -76,7 +91,9 @@ class GhostNotificationListener : NotificationListenerService() {
     }
 
     private fun saveMessage(
+        platform: String,
         conversationKey: String,
+        displayName: String,
         isGroup: Boolean,
         sender: String,
         content: String,
@@ -92,9 +109,6 @@ class GhostNotificationListener : NotificationListenerService() {
             var conversation = db.conversationDao().findByContact(conversationKey)
 
             if (conversation == null) {
-                // Brand-new conversation: only start it as "waiting" if this first
-                // message actually warrants a reply. A sticker/reaction as someone's
-                // very first message shouldn't open a waiting conversation.
                 val initialStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
                     "NEW"
                 } else {
@@ -104,6 +118,8 @@ class GhostNotificationListener : NotificationListenerService() {
                 db.conversationDao().insert(
                     ConversationEntity(
                         contactIdentifier = conversationKey,
+                        displayName = displayName,
+                        platform = platform.lowercase(),
                         isGroup = isGroup,
                         lastMessage = content,
                         lastMessageTime = timestamp,
@@ -113,9 +129,6 @@ class GhostNotificationListener : NotificationListenerService() {
                 )
                 conversation = db.conversationDao().findByContact(conversationKey)
             } else {
-                // Existing conversation: only flip to "waiting" if this new message
-                // actually requires a reply. A low-signal message (sticker, "lol")
-                // should NOT reopen or reset an already-resolved conversation's status.
                 val updatedStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
                     conversation.status
                 } else {
@@ -139,6 +152,7 @@ class GhostNotificationListener : NotificationListenerService() {
                     sender = sender,
                     content = content,
                     timestamp = timestamp,
+                    platform = platform.lowercase(),
                     requiresReply = classification.requirement.name,
                     priority = classification.priority.name
                 )
@@ -146,7 +160,7 @@ class GhostNotificationListener : NotificationListenerService() {
             if (rowId == -1L) {
                 Log.d(TAG, "Duplicate skipped: $sender | $content")
             } else {
-                Log.d(TAG, "Saved to DB: $sender | $content | ${classification.requirement} (${classification.priority}) | status: (conversation: ${conversation?.id})")
+                Log.d(TAG, "Saved to DB: [$platform] $sender | $content | ${classification.requirement} (${classification.priority}) (conversation: ${conversation?.id})")
             }
         }
     }

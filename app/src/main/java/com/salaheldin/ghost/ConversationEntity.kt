@@ -10,7 +10,8 @@ import androidx.room.PrimaryKey
 )
 data class ConversationEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val contactIdentifier: String,
+    val contactIdentifier: String,   // technical grouping key, e.g. "Instagram:Salaheldin Mahmoud"
+    val displayName: String = "",    // clean name shown in the UI, e.g. "Salaheldin Mahmoud"
     val platform: String = "whatsapp",
     val isGroup: Boolean = false,
     val lastMessage: String = "",
