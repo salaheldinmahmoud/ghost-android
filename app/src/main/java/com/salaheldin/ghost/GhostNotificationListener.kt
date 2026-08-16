@@ -20,6 +20,7 @@ class GhostNotificationListener : NotificationListenerService() {
             "org.telegram.messenger" to "Telegram",
             "com.instagram.android" to "Instagram",
             "com.facebook.orca" to "Messenger",
+            "com.facebook.katana" to "Messenger",  // Facebook app itself, handles messages on some setups
             // SMS: cover both common default apps, since it varies by phone
             "com.google.android.apps.messaging" to "SMS",
             "com.samsung.android.messaging" to "SMS"
@@ -30,6 +31,11 @@ class GhostNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
+
+        // TEMPORARY DEBUG LINE — logs every notification's package name,
+        // even ones Ghost doesn't currently recognize. Remove once we've
+        // confirmed Messenger's real package name.
+        Log.d(TAG, "[DEBUG] Notification received from package: ${sbn.packageName}")
 
         val platform = SUPPORTED_PACKAGES[sbn.packageName] ?: return
 
