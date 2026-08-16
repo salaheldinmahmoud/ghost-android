@@ -26,3 +26,17 @@ val AccentDark = Color(0xFF8B7CF6)
 val PriorityHigh = Color(0xFFEF5350)
 val PriorityMedium = Color(0xFFFFB74D)
 val PriorityLow = Color(0xFF66BB6A)
+
+// Platform brand colors — used as a visible card tint so users can tell
+// at a glance which app a conversation came from
+val PlatformWhatsApp = Color(0xFF25D366)
+val PlatformMessenger = Color(0xFF0B4F9E)   // dark blue
+val PlatformTelegram = Color(0xFF229ED9)    // light blue
+val PlatformSms = Color(0xFF757575)         // neutral grey
+
+// Instagram's real brand gradient (purple → pink → orange → yellow),
+// used as an actual vertical gradient background rather than a flat color
+val InstagramPurple = Color(0xFF833AB4)
+val InstagramPink = Color(0xFFE1306C)
+val InstagramOrange = Color(0xFFF77737)
+val InstagramYellow = Color(0xFFFCAF45)

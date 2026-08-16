@@ -34,7 +34,7 @@ object DatabaseKeyProvider {
 
         val secretKey = getOrCreateKeystoreKey()
 
-        if (existingEncrypted != null && existingIv != null) {
+        if ((existingEncrypted != null) && (existingIv != null)) {
             // Decrypt and return the existing passphrase
             val encryptedBytes = Base64.decode(existingEncrypted, Base64.NO_WRAP)
             val ivBytes = Base64.decode(existingIv, Base64.NO_WRAP)
@@ -69,11 +69,12 @@ object DatabaseKeyProvider {
         if (existingKey != null) return existingKey
 
         val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE
+            KeyProperties.KEY_ALGORITHM_AES,
+            ANDROID_KEYSTORE,
         )
         val spec = KeyGenParameterSpec.Builder(
             KEYSTORE_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)

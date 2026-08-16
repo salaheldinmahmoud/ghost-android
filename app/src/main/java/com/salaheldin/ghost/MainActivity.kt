@@ -6,7 +6,21 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -17,8 +31,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -26,6 +45,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.salaheldin.ghost.ui.theme.GhostTheme
+import com.salaheldin.ghost.ui.theme.InstagramOrange
+import com.salaheldin.ghost.ui.theme.InstagramPink
+import com.salaheldin.ghost.ui.theme.InstagramPurple
+import com.salaheldin.ghost.ui.theme.InstagramYellow
+import com.salaheldin.ghost.ui.theme.PlatformMessenger
+import com.salaheldin.ghost.ui.theme.PlatformSms
+import com.salaheldin.ghost.ui.theme.PlatformTelegram
+import com.salaheldin.ghost.ui.theme.PlatformWhatsApp
 import com.salaheldin.ghost.ui.theme.PriorityHigh
 import com.salaheldin.ghost.ui.theme.PriorityLow
 import com.salaheldin.ghost.ui.theme.PriorityMedium
@@ -39,7 +66,6 @@ sealed class Screen {
     object Statistics : Screen()
 }
 
-// Human-readable labels — technical enum/status strings never shown to the user
 fun statusLabel(status: String): String = when (status) {
     "WAITING_FOR_REPLY" -> "Waiting for reply"
     "REPLIED" -> "Replied"
@@ -53,6 +79,24 @@ fun riskLabel(score: Int): String = when {
     score >= 70 -> "High"
     score >= 40 -> "Medium"
     else -> "Low"
+}
+
+fun platformBackgroundBrush(platform: String, alpha: Float = 0.22f): Brush {
+    return when (platform.lowercase()) {
+        "whatsapp" -> Brush.linearGradient(listOf(PlatformWhatsApp.copy(alpha = alpha), PlatformWhatsApp.copy(alpha = alpha)))
+        "messenger" -> Brush.linearGradient(listOf(PlatformMessenger.copy(alpha = alpha), PlatformMessenger.copy(alpha = alpha)))
+        "telegram" -> Brush.linearGradient(listOf(PlatformTelegram.copy(alpha = alpha), PlatformTelegram.copy(alpha = alpha)))
+        "sms" -> Brush.linearGradient(listOf(PlatformSms.copy(alpha = alpha), PlatformSms.copy(alpha = alpha)))
+        "instagram" -> Brush.verticalGradient(
+            listOf(
+                InstagramPurple.copy(alpha = alpha),
+                InstagramPink.copy(alpha = alpha),
+                InstagramOrange.copy(alpha = alpha),
+                InstagramYellow.copy(alpha = alpha),
+            ),
+        )
+        else -> Brush.linearGradient(listOf(PlatformWhatsApp.copy(alpha = alpha), PlatformWhatsApp.copy(alpha = alpha)))
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -109,32 +153,34 @@ fun GhostApp(
 
     when {
         !hasPermission -> OnboardingScreen(modifier = modifier)
-        else -> when (val s = screen) {
-            is Screen.Dashboard -> GhostDashboard(
-                modifier = modifier,
-                viewModel = viewModel,
-                onConversationClick = { screen = Screen.Detail(it) },
-                onSettingsClick = { screen = Screen.Settings }
-            )
-            is Screen.Detail -> ConversationDetailScreen(
-                modifier = modifier,
-                conversation = s.conversation,
-                viewModel = viewModel,
-                onBack = { screen = Screen.Dashboard }
-            )
-            is Screen.Settings -> SettingsScreen(
-                modifier = modifier,
-                viewModel = viewModel,
-                onBack = { screen = Screen.Dashboard },
-                onStatisticsClick = { screen = Screen.Statistics },
-                themeMode = themeMode,
-                onThemeModeChange = onThemeModeChange
-            )
-            is Screen.Statistics -> StatisticsScreen(
-                modifier = modifier,
-                viewModel = viewModel,
-                onBack = { screen = Screen.Settings }
-            )
+        else -> Crossfade(targetState = screen, label = "screen_transition") { currentScreen ->
+            when (currentScreen) {
+                is Screen.Dashboard -> GhostDashboard(
+                    modifier = modifier,
+                    viewModel = viewModel,
+                    onConversationClick = { screen = Screen.Detail(it) },
+                    onSettingsClick = { screen = Screen.Settings }
+                )
+                is Screen.Detail -> ConversationDetailScreen(
+                    modifier = modifier,
+                    conversation = currentScreen.conversation,
+                    viewModel = viewModel,
+                    onBack = { screen = Screen.Dashboard }
+                )
+                is Screen.Settings -> SettingsScreen(
+                    modifier = modifier,
+                    viewModel = viewModel,
+                    onBack = { screen = Screen.Dashboard },
+                    onStatisticsClick = { screen = Screen.Statistics },
+                    themeMode = themeMode,
+                    onThemeModeChange = onThemeModeChange
+                )
+                is Screen.Statistics -> StatisticsScreen(
+                    modifier = modifier,
+                    viewModel = viewModel,
+                    onBack = { screen = Screen.Settings }
+                )
+            }
         }
     }
 }
@@ -150,7 +196,12 @@ fun OnboardingScreen(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("👻", style = MaterialTheme.typography.displayLarge)
+        Icon(
+            painter = painterResource(id = R.drawable.ic_ghost_logo),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(80.dp)
+        )
         Spacer(modifier = Modifier.height(Spacing.lg))
         Text("Welcome to Ghost", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(Spacing.md))
@@ -183,14 +234,17 @@ fun GhostDashboard(
     onSettingsClick: () -> Unit
 ) {
     val conversations by viewModel.conversations.collectAsState()
+    val currentFilter by viewModel.filterPlatform.collectAsState()
     val needsAttention = conversations.count { it.status == "WAITING_FOR_REPLY" }
+    var showFilterMenu by remember { mutableStateOf(false) }
+
+    val platforms = listOf("All", "WhatsApp", "Instagram", "Telegram", "Messenger", "SMS")
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Header
         Row(
             verticalAlignment = Alignment.Top,
             modifier = Modifier
@@ -210,11 +264,45 @@ fun GhostDashboard(
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    "Your conversations",
+                    if (currentFilter == "All") "Your conversations" else "Filtered by $currentFilter",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            Box {
+                IconButton(onClick = { showFilterMenu = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_filter),
+                        contentDescription = "Filter",
+                        tint = if (currentFilter == "All") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                    )
+                }
+                DropdownMenu(
+                    expanded = showFilterMenu,
+                    onDismissRequest = { showFilterMenu = false }
+                ) {
+                    platforms.forEach { platform ->
+                        DropdownMenuItem(
+                            text = { Text(if (platform == "All") "All Platforms" else platform) },
+                            onClick = {
+                                viewModel.setFilterPlatform(platform)
+                                showFilterMenu = false
+                            },
+                            leadingIcon = {
+                                if (currentFilter == platform) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_check),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
             IconButton(onClick = onSettingsClick) {
                 Icon(
                     painter = painterResource(R.drawable.ic_settings),
@@ -224,7 +312,11 @@ fun GhostDashboard(
             }
         }
 
-        if (needsAttention > 0) {
+        AnimatedVisibility(
+            visible = needsAttention > 0,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 })
+        ) {
             Text(
                 text = "Needs your attention · $needsAttention",
                 style = MaterialTheme.typography.labelMedium,
@@ -234,8 +326,27 @@ fun GhostDashboard(
         }
 
         if (conversations.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No conversations yet 👻", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_ghost_logo),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                        modifier = Modifier.size(80.dp)
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Text("No conversations yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "New messages will appear here",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
         } else {
             LazyColumn(
@@ -271,7 +382,7 @@ fun ConversationCard(
     var baseline by remember(conversation.id) { mutableStateOf<BaselineCalculator.Baseline?>(null) }
     var isUnusual by remember(conversation.id) { mutableStateOf<Boolean?>(null) }
     var risk by remember(conversation.id) { mutableStateOf<RiskAssessment?>(null) }
-    var expanded by remember(conversation.id) { mutableStateOf(false) }
+    var expanded by remember(conversation.id) { mutableStateOf(value = false) }
 
     LaunchedEffect(conversation.id, conversation.status) {
         val info = viewModel.getRowInfo(conversation)
@@ -280,143 +391,148 @@ fun ConversationCard(
         risk = info.risk
     }
 
-    Card(
-        onClick = onClick,
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.fillMaxWidth()
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "chevron_rotation"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(platformBackgroundBrush(conversation.platform))
+            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
+            .clickable { onClick() }
+            .animateContentSize()
+            .padding(Spacing.lg)
     ) {
-        Column(modifier = Modifier.padding(Spacing.lg)) {
-            // Who
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(priorityColor, shape = CircleShape)
-                )
-                Spacer(modifier = Modifier.width(Spacing.sm))
-                Text(
-                    conversation.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.xs))
-
-            // What happened
-            Text(
-                conversation.lastMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(priorityColor, shape = CircleShape)
             )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text(
+                conversation.displayName,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-            Spacer(modifier = Modifier.height(Spacing.sm))
+        Spacer(modifier = Modifier.height(Spacing.xs))
 
-            // Do I need to care + action
+        Text(
+            conversation.lastMessage,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                statusLabel(conversation.status),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (conversation.status == "WAITING_FOR_REPLY") {
+                FilledTonalButton(
+                    onClick = onMarkReplied,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_check),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Mark replied", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+
+        val b = baseline
+        if ((b != null) && (b.hasEnoughData)) {
+            val baselineSeconds = b.averageResponseTimeMs / 1000
+            val baselineText = if (baselineSeconds < 60) {
+                "Usually ~${baselineSeconds}s"
+            } else {
+                "Usually ~${baselineSeconds / 60}m"
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = if (isUnusual == true) "⚠️ $baselineText — longer than usual" else baselineText,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isUnusual == true) PriorityHigh else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        val r = risk
+        if (r != null && (r.score > 0)) {
+            val riskColor = when {
+                r.score >= 70 -> PriorityHigh
+                r.score >= 40 -> PriorityMedium
+                else -> PriorityLow
+            }
+            Spacer(modifier = Modifier.height(Spacing.xs))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.clickable { expanded = !expanded }
             ) {
-                Text(
-                    statusLabel(conversation.status),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(riskColor, shape = CircleShape)
                 )
-                if (conversation.status == "WAITING_FOR_REPLY") {
-                    FilledTonalButton(
-                        onClick = onMarkReplied,
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            contentColor = MaterialTheme.colorScheme.primary
-                        ),
-                        contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_check),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Mark replied", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-
-            // Baseline
-            val b = baseline
-            if (b != null && b.hasEnoughData) {
-                val baselineSeconds = b.averageResponseTimeMs / 1000
-                val baselineText = if (baselineSeconds < 60) {
-                    "Usually ~${baselineSeconds}s"
-                } else {
-                    "Usually ~${baselineSeconds / 60}m"
-                }
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.width(Spacing.xs))
                 Text(
-                    text = if (isUnusual == true) "⚠️ $baselineText — longer than usual" else baselineText,
+                    "Ghost Risk · ${r.score} · ${riskLabel(r.score)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = riskColor
+                )
+                Spacer(modifier = Modifier.width(Spacing.xs))
+                Text(
+                    "▼",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isUnusual == true) PriorityHigh else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
                 )
             }
-
-            // Why — Ghost Risk
-            val r = risk
-            if (r != null && r.score > 0) {
-                val riskColor = when {
-                    r.score >= 70 -> PriorityHigh
-                    r.score >= 40 -> PriorityMedium
-                    else -> PriorityLow
-                }
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { expanded = !expanded }
+            AnimatedVisibility(
+                visible = expanded && r.reasons.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(top = Spacing.xs)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small)
+                        .padding(Spacing.sm)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(riskColor, shape = CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.xs))
                     Text(
-                        "Ghost Risk · ${r.score} · ${riskLabel(r.score)}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = riskColor
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.xs))
-                    Text(
-                        if (expanded) "▲" else "▼",
-                        style = MaterialTheme.typography.labelSmall,
+                        "Why am I seeing this?",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                if (expanded && r.reasons.isNotEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .padding(top = Spacing.xs)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small)
-                            .padding(Spacing.sm)
-                    ) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    r.reasons.forEach { reason ->
                         Text(
-                            "Why am I seeing this?",
-                            style = MaterialTheme.typography.labelMedium,
+                            "• $reason",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        r.reasons.forEach { reason ->
-                            Text(
-                                "• $reason",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }
@@ -508,7 +624,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val conversations by viewModel.conversations.collectAsState()
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(value = false) }
 
     Column(
         modifier = modifier
@@ -622,6 +738,86 @@ fun SettingsScreen(
 }
 
 @Composable
+fun ResponseRateCircle(percent: Int, modifier: Modifier = Modifier) {
+    val animatedPercent by animateFloatAsState(
+        targetValue = percent.toFloat(),
+        animationSpec = tween(durationMillis = 900),
+        label = "response_rate"
+    )
+    val trackColor = MaterialTheme.colorScheme.outline
+    val progressColor = MaterialTheme.colorScheme.primary
+
+    Box(contentAlignment = Alignment.Center, modifier = modifier.size(140.dp)) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 14.dp.toPx()
+            drawArc(
+                color = trackColor.copy(alpha = 0.3f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = progressColor,
+                startAngle = -90f,
+                sweepAngle = 360f * (animatedPercent / 100f),
+                useCenter = false,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("${animatedPercent.toInt()}%", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                "response rate",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun MessageBreakdownBar(replied: Int, pending: Int, modifier: Modifier = Modifier) {
+    val total = (replied + pending).coerceAtLeast(1)
+    val repliedFraction by animateFloatAsState(
+        targetValue = replied.toFloat() / total.toFloat(),
+        animationSpec = tween(durationMillis = 800),
+        label = "breakdown_bar"
+    )
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(12.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(repliedFraction.coerceIn(0.0001f, 1f))
+                    .background(PriorityLow)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight((1f - repliedFraction).coerceIn(0.0001f, 1f))
+            )
+        }
+        Spacer(modifier = Modifier.height(Spacing.xs))
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text("Replied · $replied", style = MaterialTheme.typography.labelSmall, color = PriorityLow)
+            Text(
+                "Pending · $pending",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun StatisticsScreen(
     modifier: Modifier = Modifier,
     viewModel: GhostViewModel,
@@ -653,29 +849,57 @@ fun StatisticsScreen(
                 Text("Back")
             }
             Spacer(modifier = Modifier.width(Spacing.sm))
-            Text("Your Stats 👻", style = MaterialTheme.typography.headlineSmall)
+            Icon(
+                painter = painterResource(R.drawable.ic_ghost_logo),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text("Your Stats", style = MaterialTheme.typography.headlineSmall)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
-        val s = stats
-        if (s == null) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            Column(modifier = Modifier.padding(Spacing.xl)) {
-                StatRow("Messages detected", s.totalMessages.toString())
-                StatRow("Replies needed", s.repliesNeeded.toString())
-                StatRow("Replies completed", s.repliesCompleted.toString())
-                StatRow("Response rate", "${s.responseRatePercent}%")
-
-                val avgSeconds = s.averageResponseTimeMs / 1000
-                val avgText = when {
-                    s.averageResponseTimeMs == 0L -> "Not enough data yet"
-                    avgSeconds < 60 -> "~${avgSeconds}s"
-                    else -> "~${avgSeconds / 60}m"
+        AnimatedContent(
+            targetState = stats,
+            label = "stats_transition"
+        ) { s ->
+            if (s == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-                StatRow("Average response time", avgText)
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(Spacing.xl),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    ResponseRateCircle(percent = s.responseRatePercent)
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+
+                    MessageBreakdownBar(
+                        replied = s.repliesCompleted,
+                        pending = (s.repliesNeeded - s.repliesCompleted).coerceAtLeast(0)
+                    )
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        StatRow("Messages detected", s.totalMessages.toString())
+                        StatRow("Replies needed", s.repliesNeeded.toString())
+
+                        val avgSeconds = s.averageResponseTimeMs / 1000
+                        val avgText = when {
+                            s.averageResponseTimeMs == 0L -> "Not enough data yet"
+                            avgSeconds < 60 -> "~${avgSeconds}s"
+                            else -> "~${avgSeconds / 60}m"
+                        }
+                        StatRow("Average response time", avgText)
+                    }
+                }
             }
         }
     }

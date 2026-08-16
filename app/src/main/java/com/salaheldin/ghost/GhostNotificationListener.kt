@@ -23,7 +23,7 @@ class GhostNotificationListener : NotificationListenerService() {
             "com.facebook.katana" to "Messenger",  // Facebook app itself, handles messages on some setups
             // SMS: cover both common default apps, since it varies by phone
             "com.google.android.apps.messaging" to "SMS",
-            "com.samsung.android.messaging" to "SMS"
+            "com.samsung.android.messaging" to "SMS",
         )
     }
 
@@ -31,11 +31,6 @@ class GhostNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
-
-        // TEMPORARY DEBUG LINE — logs every notification's package name,
-        // even ones Ghost doesn't currently recognize. Remove once we've
-        // confirmed Messenger's real package name.
-        Log.d(TAG, "[DEBUG] Notification received from package: ${sbn.packageName}")
 
         val platform = SUPPORTED_PACKAGES[sbn.packageName] ?: return
 
@@ -69,7 +64,7 @@ class GhostNotificationListener : NotificationListenerService() {
                     isGroup = isGroup,
                     sender = sender,
                     content = text,
-                    timestamp = timestamp
+                    timestamp = timestamp,
                 )
             }
         } else {
@@ -91,7 +86,7 @@ class GhostNotificationListener : NotificationListenerService() {
                 isGroup = false,
                 sender = title,
                 content = text,
-                timestamp = sbn.postTime
+                timestamp = sbn.postTime,
             )
         }
     }
@@ -103,7 +98,7 @@ class GhostNotificationListener : NotificationListenerService() {
         isGroup: Boolean,
         sender: String,
         content: String,
-        timestamp: Long
+        timestamp: Long,
     ) {
         if (content.isBlank()) return
 
@@ -143,8 +138,8 @@ class GhostNotificationListener : NotificationListenerService() {
 
                 db.conversationDao().update(
                     conversation.copy(
-                        lastMessage = content,
-                        lastMessageTime = timestamp,
+                        lastMessage = if (timestamp >= conversation.lastMessageTime) content else conversation.lastMessage,
+                        lastMessageTime = if (timestamp >= conversation.lastMessageTime) timestamp else conversation.lastMessageTime,
                         status = updatedStatus,
                         priority = classification.priority.name,
                         updatedAt = System.currentTimeMillis()

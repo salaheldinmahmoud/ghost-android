@@ -9,7 +9,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 @Database(
     entities = [MessageEntity::class, ConversationEntity::class, ResponseEventEntity::class],
     version = 6,
-    exportSchema = false
+    exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
@@ -21,23 +21,25 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: run {
-                    // Load SQLCipher's native library before any database operation
-                    System.loadLibrary("sqlcipher")
-
-                    val passphrase = DatabaseKeyProvider.getOrCreatePassphrase(context)
-                    val factory = SupportOpenHelperFactory(passphrase)
-
-                    Room.databaseBuilder(
-                        context.applicationContext,
-                        AppDatabase::class.java,
-                        "ghost_database"
-                    )
-                        .openHelperFactory(factory)
-                        .fallbackToDestructiveMigration(true)
-                        .build().also { INSTANCE = it }
-                }
+                INSTANCE ?: buildDatabase(context).also { INSTANCE = it }
             }
+        }
+
+        private fun buildDatabase(context: Context): AppDatabase {
+            // Load SQLCipher's native library before any database operation
+            System.loadLibrary("sqlcipher")
+
+            val passphrase = DatabaseKeyProvider.getOrCreatePassphrase(context)
+            val factory = SupportOpenHelperFactory(passphrase)
+
+            return Room.databaseBuilder(
+                context.applicationContext,
+                AppDatabase::class.java,
+                "ghost_database",
+            )
+                .openHelperFactory(factory)
+                .fallbackToDestructiveMigration(dropAllTables = true)
+                .build()
         }
     }
 }

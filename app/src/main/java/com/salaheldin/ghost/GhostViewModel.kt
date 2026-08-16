@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -14,13 +16,24 @@ class GhostViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getInstance(application)
 
+    private val _filterPlatform = MutableStateFlow("All")
+    val filterPlatform: StateFlow<String> = _filterPlatform
+
     val conversations: StateFlow<List<ConversationEntity>> = db.conversationDao()
         .getAllConversations()
+        .combine(_filterPlatform) { list, platform ->
+            if (platform == "All") list
+            else list.filter { it.platform.equals(platform, ignoreCase = true) }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList(),
         )
+
+    fun setFilterPlatform(platform: String) {
+        _filterPlatform.value = platform
+    }
 
     fun markAsReplied(conversation: ConversationEntity) {
         viewModelScope.launch {
@@ -32,8 +45,8 @@ class GhostViewModel(application: Application) : AndroidViewModel(application) {
                     conversationId = conversation.id,
                     messageReceivedAt = receivedAt,
                     repliedAt = repliedAt,
-                    responseTimeMs = repliedAt - receivedAt
-                )
+                    responseTimeMs = repliedAt - receivedAt,
+                ),
             )
 
             db.conversationDao().update(
