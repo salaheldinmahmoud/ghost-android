@@ -40,3 +40,7 @@ val InstagramPurple = Color(0xFF833AB4)
 val InstagramPink = Color(0xFFE1306C)
 val InstagramOrange = Color(0xFFF77737)
 val InstagramYellow = Color(0xFFFCAF45)
+
+// Action colors
+val ActionYellow = Color(0xFFFFD600)
+val ActionOnYellow = Color(0xFF1C1B1F)

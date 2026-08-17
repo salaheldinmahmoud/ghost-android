@@ -49,6 +49,8 @@ import com.salaheldin.ghost.ui.theme.InstagramOrange
 import com.salaheldin.ghost.ui.theme.InstagramPink
 import com.salaheldin.ghost.ui.theme.InstagramPurple
 import com.salaheldin.ghost.ui.theme.InstagramYellow
+import com.salaheldin.ghost.ui.theme.ActionYellow
+import com.salaheldin.ghost.ui.theme.ActionOnYellow
 import com.salaheldin.ghost.ui.theme.PlatformMessenger
 import com.salaheldin.ghost.ui.theme.PlatformSms
 import com.salaheldin.ghost.ui.theme.PlatformTelegram
@@ -591,23 +593,41 @@ fun ConversationDetailScreen(
         }
 
         if (conversation.status == "WAITING_FOR_REPLY") {
-            Button(
-                onClick = {
-                    viewModel.markAsReplied(conversation)
-                    onBack()
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(Spacing.lg)
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_check),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Mark replied")
+                val context = LocalContext.current
+                Button(
+                    onClick = { PlatformLauncher.launch(context, conversation) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ActionYellow,
+                        contentColor = ActionOnYellow
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Go to Platform")
+                }
+
+                Spacer(modifier = Modifier.height(Spacing.sm))
+
+                Button(
+                    onClick = {
+                        viewModel.markAsReplied(conversation)
+                        onBack()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_check),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Mark replied")
+                }
             }
         }
     }
