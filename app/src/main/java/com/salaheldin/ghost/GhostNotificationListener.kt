@@ -211,27 +211,14 @@ class GhostNotificationListener : NotificationListenerService() {
                     )
                 )
                 conversation = db.conversationDao().findByContact(conversationKey)
-            } else {
-                val updatedStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
-                    conversation.status
-                } else {
-                    "WAITING_FOR_REPLY"
-                }
-
-                db.conversationDao().update(
-                    conversation.copy(
-                        lastMessage = if (timestamp >= conversation.lastMessageTime) content else conversation.lastMessage,
-                        lastMessageTime = if (timestamp >= conversation.lastMessageTime) timestamp else conversation.lastMessageTime,
-                        status = updatedStatus,
-                        priority = classification.priority.name,
-                        updatedAt = System.currentTimeMillis()
-                    )
-                )
+                Log.d(TAG, "Created new conversation: id=${conversation?.id}, priority=${classification.priority.name}")
             }
+
+            val currentConversation = conversation ?: return@launch
 
             val rowId = db.messageDao().insert(
                 MessageEntity(
-                    conversationId = conversation?.id ?: 0,
+                    conversationId = currentConversation.id,
                     sender = sender,
                     content = content,
                     timestamp = timestamp,
@@ -240,11 +227,38 @@ class GhostNotificationListener : NotificationListenerService() {
                     priority = classification.priority.name
                 )
             )
+
             if (rowId == -1L) {
                 Log.d(TAG, "Duplicate skipped: $sender | $content")
             } else {
-                Log.d(TAG, "Saved to DB: [$platform] $sender | $content | ${classification.requirement} (${classification.priority}) (conversation: ${conversation?.id})")
+                Log.d(TAG, "Saved to DB: [$platform] $sender | $content | ${classification.requirement} (${classification.priority}) (conversation: ${currentConversation.id})")
+
+                // Update conversation summary only for NEW messages
+                val isLatest = timestamp >= currentConversation.lastMessageTime
                 
+                val updatedStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
+                    currentConversation.status
+                } else {
+                    "WAITING_FOR_REPLY"
+                }
+
+                val oldPriority = currentConversation.priority
+                val latestPriority = classification.priority.name
+                val finalPriority = if (isLatest) latestPriority else oldPriority
+
+                Log.d(TAG, "Updating conversation ${currentConversation.id} priority: " +
+                        "old=$oldPriority, message=$latestPriority, final=$finalPriority (isLatest=$isLatest)")
+
+                db.conversationDao().update(
+                    currentConversation.copy(
+                        lastMessage = if (isLatest) content else currentConversation.lastMessage,
+                        lastMessageTime = if (isLatest) timestamp else currentConversation.lastMessageTime,
+                        status = updatedStatus,
+                        priority = finalPriority,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+
                 // Update "New Messages" notification
                 newMessagesCount++
                 newMessagesPlatforms.add(platform)

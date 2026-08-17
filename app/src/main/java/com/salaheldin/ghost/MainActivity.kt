@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -165,6 +166,15 @@ fun GhostApp(
         ) { /* Ignore */ }
         LaunchedEffect(Unit) {
             launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    BackHandler(enabled = screen != Screen.Dashboard) {
+        screen = when (screen) {
+            is Screen.Detail -> Screen.Dashboard
+            is Screen.Settings -> Screen.Dashboard
+            is Screen.Statistics -> Screen.Settings
+            else -> Screen.Dashboard
         }
     }
 
