@@ -25,7 +25,7 @@ object MessageClassifier {
         // English
         "tomorrow", "asap", "urgent", "important", "deadline", "meeting",
         "please", "can you", "could you", "when", "where", "need you",
-        "call me", "reply", "answer", "now", "yesterday",
+        "call me", "reply", "answer", "now", "yesterday", "help",
         // Arabic script
         "امتى", "لو سمحت", "مهم", "بكرة", "ضروري", "اتصل",
         // Franco-Arabic — urgent / attention

@@ -1,6 +1,7 @@
 package com.salaheldin.ghost
 
 import android.content.Context
+import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -17,11 +18,30 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun responseEventDao(): ResponseEventDao
 
     companion object {
+        private const val TAG = "GhostDatabase"
         @Volatile private var INSTANCE: AppDatabase? = null
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: buildDatabase(context).also { INSTANCE = it }
+                INSTANCE ?: try {
+                    buildDatabase(context).also { INSTANCE = it }
+                } catch (_: DatabaseKeyProvider.KeyDecryptionException) {
+                    Log.e(TAG, "Database key decryption failed; secure database recovery required.")
+                    
+                    // Close instance if it somehow exists (though unlikely here)
+                    INSTANCE?.close()
+                    INSTANCE = null
+
+                    Log.w(TAG, "Deleting unrecoverable local database.")
+                    context.deleteDatabase("ghost_database")
+                    
+                    DatabaseKeyProvider.clearKeyMaterial(context)
+
+                    // Retry once. If this fails again, let the exception propagate to avoid infinite loops.
+                    val newDb = buildDatabase(context)
+                    Log.i(TAG, "Database recovery completed.")
+                    newDb.also { INSTANCE = it }
+                }
             }
         }
 

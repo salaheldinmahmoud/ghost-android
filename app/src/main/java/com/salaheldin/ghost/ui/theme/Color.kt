@@ -30,7 +30,7 @@ val PriorityLow = Color(0xFF66BB6A)
 // Platform brand colors — used as a visible card tint so users can tell
 // at a glance which app a conversation came from
 val PlatformWhatsApp = Color(0xFF25D366)
-val PlatformMessenger = Color(0xFF0B4F9E)   // dark blue
+val PlatformMessenger = Color(0xFF0084FF)   // vibrant messenger blue
 val PlatformTelegram = Color(0xFF229ED9)    // light blue
 val PlatformSms = Color(0xFF757575)         // neutral grey
 

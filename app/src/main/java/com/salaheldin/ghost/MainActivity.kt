@@ -87,7 +87,7 @@ fun riskLabel(score: Int): String = when {
     else -> "Low"
 }
 
-fun platformBackgroundBrush(platform: String, alpha: Float = 0.22f): Brush {
+fun platformBackgroundBrush(platform: String, alpha: Float = 0.28f): Brush {
     return when (platform.lowercase()) {
         "whatsapp" -> Brush.linearGradient(listOf(PlatformWhatsApp.copy(alpha = alpha), PlatformWhatsApp.copy(alpha = alpha)))
         "messenger" -> Brush.linearGradient(listOf(PlatformMessenger.copy(alpha = alpha), PlatformMessenger.copy(alpha = alpha)))

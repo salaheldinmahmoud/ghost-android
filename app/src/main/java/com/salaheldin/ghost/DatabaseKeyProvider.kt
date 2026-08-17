@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -21,11 +22,14 @@ import javax.crypto.spec.GCMParameterSpec
  */
 object DatabaseKeyProvider {
 
+    private const val TAG = "GhostKeyProvider"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEYSTORE_ALIAS = "ghost_db_key"
     private const val PREFS_NAME = "ghost_secure_prefs"
     private const val KEY_ENCRYPTED_PASSPHRASE = "encrypted_passphrase"
     private const val KEY_IV = "passphrase_iv"
+
+    class KeyDecryptionException(cause: Throwable) : Exception(cause)
 
     fun getOrCreatePassphrase(context: Context): ByteArray {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -35,16 +39,22 @@ object DatabaseKeyProvider {
         val secretKey = getOrCreateKeystoreKey()
 
         if ((existingEncrypted != null) && (existingIv != null)) {
-            // Decrypt and return the existing passphrase
-            val encryptedBytes = Base64.decode(existingEncrypted, Base64.NO_WRAP)
-            val ivBytes = Base64.decode(existingIv, Base64.NO_WRAP)
+            try {
+                // Decrypt and return the existing passphrase
+                val encryptedBytes = Base64.decode(existingEncrypted, Base64.NO_WRAP)
+                val ivBytes = Base64.decode(existingIv, Base64.NO_WRAP)
 
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(128, ivBytes))
-            return cipher.doFinal(encryptedBytes)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(128, ivBytes))
+                return cipher.doFinal(encryptedBytes)
+            } catch (e: Exception) {
+                Log.e(TAG, "Database key decryption failed; secure database recovery required.")
+                throw KeyDecryptionException(e)
+            }
         }
 
         // First launch: generate a new random passphrase, encrypt it, store it
+        Log.d(TAG, "Generating fresh database encryption key.")
         val newPassphrase = ByteArray(32)
         SecureRandom().nextBytes(newPassphrase)
 
@@ -59,6 +69,22 @@ object DatabaseKeyProvider {
             .apply()
 
         return newPassphrase
+    }
+
+    fun clearKeyMaterial(context: Context) {
+        Log.w(TAG, "Clearing invalid database key material.")
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+
+        try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+            keyStore.load(null)
+            if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
+                keyStore.deleteEntry(KEYSTORE_ALIAS)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear Keystore entry", e)
+        }
     }
 
     private fun getOrCreateKeystoreKey(): java.security.Key {
