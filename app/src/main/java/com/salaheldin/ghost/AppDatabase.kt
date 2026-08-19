@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
@@ -13,8 +15,8 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         ConversationEntity::class,
         ResponseEventEntity::class,
     ],
-    version = 7,
-    exportSchema = false,
+    version = 8,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
@@ -23,63 +25,56 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         private const val TAG = "GhostDatabase"
+        private const val DB_NAME = "ghost_database"
+
         @Volatile private var INSTANCE: AppDatabase? = null
+
+        /**
+         * 7 -> 8: adds `awaitingSince` to conversations and the
+         * indexes the list/stat queries depend on. Purely additive: no data loss.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN awaitingSince INTEGER NOT NULL DEFAULT 0")
+                // Seed it so existing waiting rows aren't reported as instant replies.
+                db.execSQL("UPDATE conversations SET awaitingSince = lastMessageTime WHERE status = 'WAITING_FOR_REPLY'")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_lastMessageTime ON conversations(lastMessageTime)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_status ON conversations(status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_conversationId_timestamp ON messages(conversationId, timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_response_events_conversationId ON response_events(conversationId)")
+
+                // Orphan rows would violate the new foreign keys.
+                db.execSQL("DELETE FROM messages WHERE conversationId NOT IN (SELECT id FROM conversations)")
+                db.execSQL("DELETE FROM response_events WHERE conversationId NOT IN (SELECT id FROM conversations)")
+            }
+        }
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: try {
-                    buildDatabase(context).also {
-                        INSTANCE = it
-                        debugDatabaseInspect(it)
-                    }
+                    buildDatabase(context).also { INSTANCE = it }
                 } catch (_: DatabaseKeyProvider.KeyDecryptionException) {
                     Log.e(TAG, "Database key decryption failed; secure database recovery required.")
 
-                    // Close instance if it somehow exists (though unlikely here)
                     INSTANCE?.close()
                     INSTANCE = null
 
                     Log.w(TAG, "Deleting unrecoverable local database.")
-                    context.deleteDatabase("ghost_database")
-
+                    context.deleteDatabase(DB_NAME)
                     DatabaseKeyProvider.clearKeyMaterial(context)
 
-                    // Retry once. If this fails again, let the exception propagate to avoid infinite loops.
-                    val newDb = buildDatabase(context)
-                    Log.i(TAG, "Database recovery completed.")
-                    newDb.also {
+                    // Retry once. If this fails again, let it propagate — no infinite loop.
+                    buildDatabase(context).also {
                         INSTANCE = it
-                        debugDatabaseInspect(it)
+                        Log.i(TAG, "Database recovery completed.")
                     }
                 }
             }
         }
 
-        private fun debugDatabaseInspect(db: AppDatabase) {
-            try {
-                val sdb = db.openHelper.readableDatabase
-                Log.d(TAG, "--- DEBUG: Database Inspection Start ---")
-                Log.d(TAG, "Database path: ${sdb.path}")
-
-                // 1. List all tables
-                val cursor = sdb.query("SELECT name FROM sqlite_master WHERE type='table'")
-                val tables = mutableListOf<String>()
-                while (cursor.moveToNext()) {
-                    tables.add(cursor.getString(0))
-                }
-                cursor.close()
-                Log.d(TAG, "Tables present: ${tables.joinToString(", ")}")
-
-
-
-                Log.d(TAG, "--- DEBUG: Database Inspection End ---")
-            } catch (e: Exception) {
-                Log.e(TAG, "Debug inspection failed: ${e.message}")
-            }
-        }
-
         private fun buildDatabase(context: Context): AppDatabase {
-            // Load SQLCipher's native library before any database operation
+            // SQLCipher's native library must be loaded before any DB operation.
             System.loadLibrary("sqlcipher")
 
             val passphrase = DatabaseKeyProvider.getOrCreatePassphrase(context)
@@ -88,10 +83,10 @@ abstract class AppDatabase : RoomDatabase() {
             return Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
-                "ghost_database",
+                DB_NAME,
             )
                 .openHelperFactory(factory)
-                .fallbackToDestructiveMigration(dropAllTables = true)
+                .addMigrations(MIGRATION_7_8)
                 .build()
         }
     }

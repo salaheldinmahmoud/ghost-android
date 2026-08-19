@@ -21,9 +21,19 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: Long): Flow<List<MessageEntity>>
 
+    /** Batched replacement for the per-row N+1 lookup in the list UI. */
+    @Query(
+        """
+        SELECT m.* FROM messages m
+        INNER JOIN (
+            SELECT conversationId, MAX(timestamp) AS t
+            FROM messages GROUP BY conversationId
+        ) latest
+          ON m.conversationId = latest.conversationId AND m.timestamp = latest.t
+        """
+    )
+    fun getLatestMessagePerConversation(): Flow<List<MessageEntity>>
+
     @Query("SELECT COUNT(*) FROM messages")
     suspend fun getTotalMessageCount(): Int
-
-    @Query("SELECT COUNT(*) FROM messages WHERE requiresReply != 'NO_REPLY_REQUIRED'")
-    suspend fun getRepliesNeededCount(): Int
 }

@@ -31,8 +31,8 @@ object RiskScoreCalculator {
             ReplyRequirement.NO_REPLY_REQUIRED -> {}
         }
 
-        if (baseline.hasEnoughData && baseline.averageResponseTimeMs > 0) {
-            val ratio = currentWaitMs.toDouble() / baseline.averageResponseTimeMs
+        if (baseline.hasEnoughData && baseline.typicalResponseTimeMs > 0) {
+            val ratio = currentWaitMs.toDouble() / baseline.typicalResponseTimeMs
             when {
                 ratio >= 2.5 -> { score += 40; reasons.add("Waiting much longer than usual for this contact") }
                 ratio >= 1.5 -> { score += 20; reasons.add("Waiting longer than usual for this contact") }

@@ -1,12 +1,24 @@
 package com.salaheldin.ghost
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "messages",
-    indices = [Index(value = ["sender", "content", "timestamp"], unique = true)]
+    indices = [
+        Index(value = ["sender", "content", "timestamp"], unique = true),
+        Index(value = ["conversationId", "timestamp"]),
+    ],
+    foreignKeys = [
+        ForeignKey(
+            entity = ConversationEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
 )
 data class MessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

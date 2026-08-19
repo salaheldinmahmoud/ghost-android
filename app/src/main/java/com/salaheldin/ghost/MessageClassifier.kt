@@ -52,11 +52,19 @@ object MessageClassifier {
         "3andena wa2t 2aleel", "mafeesh wa2t", "el wa2t by5les",
         "la7e2", "mesh la7e2", "la7e2ena", "emta", "3ala tool",
         "men delwa2ty", "2abl ma",
-        // ("ba3den" / "later" intentionally excluded — signals postponing, not urgency
-        // Franco-Arabic — strong urgent phrases (lowercased for matching)
+        // ("ba3den" / "later" intentionally excluded — signals postponing, not urgency)
+        // Franco-Arabic — strong urgent phrases
         "ta3ala saree3", "esma3ny darory", "kallemny lamma teshoof",
         "shoof el msg de delwa2ty"
     )
+
+    private val urgentPattern: Regex by lazy {
+        val alternation = urgentKeywords
+            .sortedByDescending { it.length }
+            .joinToString("|") { Regex.escape(it) }
+        // \b works for latin/franco; the (?<![\p{L}]) guard covers Arabic script.
+        Regex("(?<![\\p{L}\\p{N}])(?:$alternation)(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE)
+    }
 
     private val lowSignalMarkers = listOf(
         "😂", "😊", "👍", "❤", "💟", "🙄", "sticker", "photo", "reel", "views", "reacted"
@@ -71,18 +79,19 @@ object MessageClassifier {
 
         val lower = trimmed.lowercase()
         val hasQuestion = questionMarkers.any { trimmed.contains(it) }
-        val hasUrgentKeyword = urgentKeywords.any { lower.contains(it) }
+        val hasUrgentKeyword = urgentPattern.containsMatchIn(lower)
         val isLowSignal = trimmed.length <= 3 || lowSignalMarkers.any { lower.contains(it) }
 
         return when {
+            // Low-signal check runs FIRST: "👍" plus a stray keyword is still noise.
+            isLowSignal && !hasQuestion ->
+                ClassificationResult(ReplyRequirement.NO_REPLY_REQUIRED, Priority.LOW)
             hasQuestion && hasUrgentKeyword ->
                 ClassificationResult(ReplyRequirement.REPLY_REQUIRED, Priority.HIGH)
             hasUrgentKeyword ->
                 ClassificationResult(ReplyRequirement.REPLY_REQUIRED, Priority.HIGH)
             hasQuestion ->
                 ClassificationResult(ReplyRequirement.REPLY_REQUIRED, Priority.MEDIUM)
-            isLowSignal ->
-                ClassificationResult(ReplyRequirement.NO_REPLY_REQUIRED, Priority.LOW)
             else ->
                 ClassificationResult(ReplyRequirement.POSSIBLY_REQUIRES_REPLY, Priority.MEDIUM)
         }

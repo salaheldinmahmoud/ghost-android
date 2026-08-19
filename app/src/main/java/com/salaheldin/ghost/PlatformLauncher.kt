@@ -2,7 +2,6 @@ package com.salaheldin.ghost
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.net.toUri
@@ -11,124 +10,109 @@ object PlatformLauncher {
 
     private const val TAG = "GhostPlatformLauncher"
 
+    private val PACKAGES = mapOf(
+        "whatsapp" to "com.whatsapp",
+        "instagram" to "com.instagram.android",
+        "messenger" to "com.facebook.orca",
+        "telegram" to "org.telegram.messenger",
+    )
+
+    private val READABLE = mapOf(
+        "whatsapp" to "WhatsApp",
+        "instagram" to "Instagram",
+        "messenger" to "Messenger",
+        "telegram" to "Telegram",
+        "sms" to "Messages",
+    )
+
     /**
-     * Attempts to open the appropriate messaging platform for a conversation.
-     * Falls back to opening the app if a direct conversation link isn't possible.
+     * Opens the conversation on its platform. Deep links are built from the
+     * stored `handle` only — the old code fed displayName ("Salaheldin Mahmoud")
+     * into instagram.com/_u/ and t.me/, which resolves to a wrong profile or a
+     * dead link. A name is not a handle.
      */
     fun launch(context: Context, conversation: ConversationEntity) {
         val platform = conversation.platform.lowercase()
-        val displayName = conversation.displayName
-        val packageName = getPackageName(platform)
-
-        Log.d(TAG, "--- Launch Start ---")
-        Log.d(TAG, "platform = $platform")
-        Log.d(TAG, "expected package = $packageName")
-
-        if (packageName.isNotEmpty()) {
-            try {
-                val info = context.packageManager.getPackageInfo(packageName, 0)
-                Log.d(TAG, "package installed/check result = true (version: ${info.versionName})")
-            } catch (_: PackageManager.NameNotFoundException) {
-                Log.d(TAG, "package installed/check result = false")
-            }
-        }
+        val packageName = PACKAGES[platform].orEmpty()
+        val readable = READABLE[platform] ?: platform.replaceFirstChar { it.uppercase() }
 
         if (platform == "sms") {
-            launchSms(context, displayName)
+            launchSms(context, conversation.handle.ifEmpty { conversation.displayName })
             return
         }
 
-        // Try deep link first if applicable
-        val deepLinkIntent = getDeepLinkIntent(platform, displayName)
-        if (deepLinkIntent != null) {
+        // Group chats have no per-user deep link; go straight to the app.
+        val deepLink = if (conversation.isGroup) null else getDeepLinkIntent(platform, conversation.handle)
+
+        if (deepLink != null) {
             try {
-                Log.d(TAG, "launching deep link: ${deepLinkIntent.data}")
-                deepLinkIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(deepLinkIntent)
-                Log.d(TAG, "deep link launch successful")
+                deepLink.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(deepLink)
                 return
             } catch (e: Exception) {
-                Log.d(TAG, "deep link failed, falling back to app launch: ${e.message}")
+                Log.d(TAG, "Deep link failed, falling back to app launch: ${e.message}")
             }
         }
 
-        // Fallback to app launch
-        if (packageName.isNotEmpty()) {
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-            Log.d(TAG, "launchIntent result = ${if (launchIntent != null) "Found" else "Null"}")
+        if (packageName.isEmpty()) {
+            showError(context, "Unsupported platform: $readable")
+            return
+        }
 
-            if (launchIntent != null) {
-                try {
-                    Log.d(TAG, "launching package: $packageName")
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launchIntent)
-                    Log.d(TAG, "package launch successful")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to launch package $packageName: ${e.message}")
-                    showError(context, "Could not open $platform")
-                }
-            } else {
-                val readableName = when (platform) {
-                    "whatsapp" -> "WhatsApp"
-                    "instagram" -> "Instagram"
-                    "messenger" -> "Messenger"
-                    "telegram" -> "Telegram"
-                    else -> platform.replaceFirstChar { it.uppercase() }
-                }
-                showError(context, "$readableName is not installed.")
-            }
-        } else {
-            showError(context, "Unsupported platform: $platform")
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent == null) {
+            showError(context, "$readable is not installed.")
+            return
+        }
+
+        try {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(launchIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch $packageName: ${e.message}")
+            showError(context, "Could not open $readable")
         }
     }
 
-    private fun getDeepLinkIntent(platform: String, displayName: String): Intent? {
+    private fun getDeepLinkIntent(platform: String, handle: String): Intent? {
+        if (handle.isBlank()) return null
+
         return when (platform) {
             "whatsapp" -> {
-                if (displayName.all { it.isDigit() || it == '+' || it == ' ' || it == '-' } && displayName.length > 5) {
-                    val clean = displayName.replace(Regex("[^0-9+]"), "")
-                    Intent(Intent.ACTION_VIEW, "https://wa.me/$clean".toUri()).setPackage("com.whatsapp")
+                val digits = handle.filter { it.isDigit() }
+                if (digits.length >= 8) {
+                    Intent(Intent.ACTION_VIEW, "https://wa.me/$digits".toUri())
+                        .setPackage("com.whatsapp")
                 } else null
             }
             "instagram" -> {
-                if (!displayName.contains(" ")) {
-                    Intent(Intent.ACTION_VIEW, "http://instagram.com/_u/$displayName".toUri()).setPackage("com.instagram.android")
+                val username = handle.removePrefix("@")
+                if (username.matches(Regex("^[A-Za-z0-9._]{1,30}$"))) {
+                    Intent(Intent.ACTION_VIEW, "https://instagram.com/_u/$username".toUri())
+                        .setPackage("com.instagram.android")
                 } else null
             }
             "telegram" -> {
-                if (displayName.startsWith("@")) {
-                    Intent(Intent.ACTION_VIEW, "https://t.me/${displayName.substring(1)}".toUri()).setPackage("org.telegram.messenger")
-                } else if (!displayName.contains(" ")) {
-                    Intent(Intent.ACTION_VIEW, "https://t.me/$displayName".toUri()).setPackage("org.telegram.messenger")
+                val username = handle.removePrefix("@")
+                if (username.matches(Regex("^[A-Za-z0-9_]{5,32}$"))) {
+                    Intent(Intent.ACTION_VIEW, "https://t.me/$username".toUri())
+                        .setPackage("org.telegram.messenger")
                 } else null
             }
             else -> null
         }
     }
 
-    private fun launchSms(context: Context, displayName: String) {
+    private fun launchSms(context: Context, handle: String) {
         try {
-            val uri = if (displayName.all { it.isDigit() || it == '+' || it == ' ' || it == '-' }) {
-                "smsto:${displayName.replace(" ", "")}".toUri()
-            } else {
-                "smsto:".toUri()
-            }
+            val digits = handle.filter { it.isDigit() || it == '+' }
+            val uri = if (digits.length >= 5) "smsto:$digits".toUri() else "smsto:".toUri()
             val intent = Intent(Intent.ACTION_SENDTO, uri)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch SMS: ${e.message}")
-            showError(context, "Could not open SMS")
-        }
-    }
-
-    private fun getPackageName(platform: String): String {
-        return when (platform) {
-            "whatsapp" -> "com.whatsapp"
-            "instagram" -> "com.instagram.android"
-            "messenger" -> "com.facebook.katana"
-            "telegram" -> "org.telegram.messenger"
-            else -> ""
+            showError(context, "Could not open Messages")
         }
     }
 

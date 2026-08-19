@@ -5,20 +5,25 @@ object BaselineCalculator {
     private const val MIN_EVENTS_FOR_BASELINE = 3
 
     data class Baseline(
-        val averageResponseTimeMs: Long,
+        val typicalResponseTimeMs: Long,
         val sampleSize: Int,
         val hasEnoughData: Boolean
     )
 
     fun calculate(events: List<ResponseEventEntity>): Baseline {
         if (events.isEmpty()) {
-            return Baseline(averageResponseTimeMs = 0, sampleSize = 0, hasEnoughData = false)
+            return Baseline(typicalResponseTimeMs = 0, sampleSize = 0, hasEnoughData = false)
         }
 
-        val average = events.map { it.responseTimeMs }.average().toLong()
+        val sorted = events.map { it.responseTimeMs }.sorted()
+        val median = if (sorted.size % 2 == 1) {
+            sorted[sorted.size / 2]
+        } else {
+            (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
+        }
 
         return Baseline(
-            averageResponseTimeMs = average,
+            typicalResponseTimeMs = median,
             sampleSize = events.size,
             hasEnoughData = events.size >= MIN_EVENTS_FOR_BASELINE
         )
@@ -35,8 +40,8 @@ object BaselineCalculator {
         thresholdMultiplier: Double = 2.5
     ): Boolean? {
         if (!baseline.hasEnoughData) return null
-        if (baseline.averageResponseTimeMs <= 0) return null
+        if (baseline.typicalResponseTimeMs <= 0) return null
 
-        return currentWaitMs > baseline.averageResponseTimeMs * thresholdMultiplier
+        return currentWaitMs > baseline.typicalResponseTimeMs * thresholdMultiplier
     }
 }

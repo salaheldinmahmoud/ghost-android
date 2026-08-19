@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -376,14 +377,16 @@ fun GhostDashboard(
                 }
             }
         } else {
+            val rowInfoMap by viewModel.rowInfo.collectAsStateWithLifecycle()
+
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.sm),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                items(conversations) { conversation ->
+                items(conversations, key = { it.id }) { conversation ->
                     ConversationCard(
                         conversation = conversation,
-                        viewModel = viewModel,
+                        info = rowInfoMap[conversation.id],
                         onMarkReplied = { viewModel.markAsReplied(conversation) },
                         onClick = { onConversationClick(conversation) }
                     )
@@ -396,7 +399,7 @@ fun GhostDashboard(
 @Composable
 fun ConversationCard(
     conversation: ConversationEntity,
-    viewModel: GhostViewModel,
+    info: GhostViewModel.RowInfo?,
     onMarkReplied: () -> Unit,
     onClick: () -> Unit
 ) {
@@ -406,17 +409,11 @@ fun ConversationCard(
         else -> PriorityLow
     }
 
-    var baseline by remember(conversation.id) { mutableStateOf<BaselineCalculator.Baseline?>(null) }
-    var isUnusual by remember(conversation.id) { mutableStateOf<Boolean?>(null) }
-    var risk by remember(conversation.id) { mutableStateOf<RiskAssessment?>(null) }
     var expanded by remember(conversation.id) { mutableStateOf(value = false) }
 
-    LaunchedEffect(conversation.id, conversation.status) {
-        val info = viewModel.getRowInfo(conversation)
-        baseline = info.baseline
-        isUnusual = info.isUnusual
-        risk = info.risk
-    }
+    val baseline = info?.baseline
+    val isUnusual = info?.isUnusual
+    val risk = info?.risk
 
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
@@ -492,7 +489,7 @@ fun ConversationCard(
 
         val b = baseline
         if ((b != null) && (b.hasEnoughData)) {
-            val baselineSeconds = b.averageResponseTimeMs / 1000
+            val baselineSeconds = b.typicalResponseTimeMs / 1000
             val baselineText = if (baselineSeconds < 60) {
                 "Usually ~${baselineSeconds}s"
             } else {
@@ -606,7 +603,7 @@ fun ConversationDetailScreen(
             }
         } else {
             LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = Spacing.lg)) {
-                items(messages) { message ->
+                items(messages, key = { it.id }) { message ->
                     Column(modifier = Modifier.padding(vertical = Spacing.sm)) {
                         Text(message.sender, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(2.dp))

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -28,8 +27,7 @@ class GhostNotificationListener : NotificationListenerService() {
             "org.telegram.messenger" to "Telegram",
             "com.instagram.android" to "Instagram",
             "com.facebook.orca" to "Messenger",
-            "com.facebook.katana" to "Messenger",  // Facebook app itself, handles messages on some setups
-            // SMS: cover both common default apps, since it varies by phone
+            "com.facebook.katana" to "Messenger",
             "com.google.android.apps.messaging" to "SMS",
             "com.samsung.android.messaging" to "SMS",
         )
@@ -44,17 +42,17 @@ class GhostNotificationListener : NotificationListenerService() {
             if (intent?.action == ACTION_RESET_NEW_MESSAGES) {
                 newMessagesCount = 0
                 newMessagesPlatforms.clear()
-                Log.d(TAG, "New message counts reset via broadcast")
+                GLog.d(TAG) { "New message counts reset via broadcast" }
             }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "GhostNotificationListener created")
+        GLog.d(TAG) { "GhostNotificationListener created" }
         GhostNotificationManager.createChannels(this)
         observeAttentionSignals()
-        
+
         val filter = IntentFilter(ACTION_RESET_NEW_MESSAGES)
         ContextCompat.registerReceiver(this, resetReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
@@ -62,24 +60,22 @@ class GhostNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(resetReceiver)
+        serviceScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
     }
 
     private fun observeAttentionSignals() {
         val db = AppDatabase.getInstance(this)
-        Log.d(TAG, "Observing database for attention signals")
-        
-        // Observe WAITING_FOR_REPLY count
+        GLog.d(TAG) { "Observing database for attention signals" }
+
         serviceScope.launch {
             db.conversationDao().getAllConversations()
                 .map { list -> list.count { it.status == "WAITING_FOR_REPLY" } }
                 .distinctUntilChanged()
                 .collect { count ->
-                    Log.d(TAG, "Waiting count update: $count")
                     GhostNotificationManager.showWaitingForReply(applicationContext, count)
                 }
         }
 
-        // Observe UNUSUAL_DELAY count
         serviceScope.launch {
             db.conversationDao().getAllConversations()
                 .map { list ->
@@ -97,7 +93,6 @@ class GhostNotificationListener : NotificationListenerService() {
                 }
                 .distinctUntilChanged()
                 .collect { count ->
-                    Log.d(TAG, "Unusual delay count update: $count")
                     GhostNotificationManager.showUnusualDelay(applicationContext, count)
                 }
         }
@@ -105,18 +100,18 @@ class GhostNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
-        Log.d(TAG, "Notification received from: ${sbn.packageName}")
 
         // Ignore Ghost's own notifications
-        if (sbn.packageName == packageName) {
-            Log.d(TAG, "Ignoring Ghost's own notification")
-            return
-        }
+        if (sbn.packageName == packageName) return
 
         val platform = SUPPORTED_PACKAGES[sbn.packageName] ?: return
 
         val isGroupSummary = (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0
         if (isGroupSummary) return
+
+        // Platform-native handle when the OS gives us one — far more reliable
+        // than a display name for deep linking.
+        val handle = sbn.notification.shortcutId ?: ""
 
         val messagingStyle = NotificationCompat.MessagingStyle
             .extractMessagingStyleFromNotification(sbn.notification)
@@ -125,27 +120,28 @@ class GhostNotificationListener : NotificationListenerService() {
             val isGroup = messagingStyle.isGroupConversation
             val conversationName = if (isGroup) {
                 val rawTitle = messagingStyle.conversationTitle?.toString() ?: "Unknown Group"
-                // Strip WhatsApp-style trailing unread counts, e.g. "Test (4 messages)"
                 rawTitle.replace(Regex("\\s*\\(\\d+\\s*messages?\\)\\s*$"), "").trim()
             } else {
                 messagingStyle.messages.lastOrNull()?.person?.name?.toString() ?: "Unknown"
             }
 
+            val personUri = messagingStyle.messages.lastOrNull()?.person?.uri.orEmpty()
+
             for (message in messagingStyle.messages) {
                 val sender = message.person?.name?.toString() ?: conversationName
                 val text = message.text?.toString() ?: ""
-                val timestamp = message.timestamp
 
-                Log.d(TAG, "[$platform][MessagingStyle] Group: $isGroup | Conversation: $conversationName | Sender: $sender | Text: $text")
+                GLog.d(TAG) { "[$platform][MessagingStyle] group=$isGroup len=${text.length}" }
 
                 saveMessage(
                     platform = platform,
                     conversationKey = "$platform:$conversationName",
                     displayName = conversationName,
+                    handle = handle.ifEmpty { extractHandle(personUri) },
                     isGroup = isGroup,
                     sender = sender,
                     content = text,
-                    timestamp = timestamp,
+                    timestamp = message.timestamp,
                 )
             }
         } else {
@@ -153,17 +149,16 @@ class GhostNotificationListener : NotificationListenerService() {
             val title = extras.getString("android.title") ?: ""
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
-            // Skip the app's own system/status notifications (e.g. WhatsApp's
-            // "Checking for new messages", or similar for other platforms) —
-            // these aren't real conversations, just the app's own name as the title.
+            // Skip the app's own system notifications ("Checking for new messages").
             if (title.equals(platform, ignoreCase = true)) return
 
-            Log.d(TAG, "[$platform][Fallback] Title: $title | Text: $text")
+            GLog.d(TAG) { "[$platform][Fallback] len=${text.length}" }
 
             saveMessage(
                 platform = platform,
                 conversationKey = "$platform:$title",
                 displayName = title,
+                handle = handle,
                 isGroup = false,
                 sender = title,
                 content = text,
@@ -172,10 +167,15 @@ class GhostNotificationListener : NotificationListenerService() {
         }
     }
 
+    /** "tel:+201234567890" / "mailto:x@y.z" -> the bare handle. */
+    private fun extractHandle(uri: String): String =
+        uri.substringAfter("tel:", "").ifEmpty { "" }
+
     private fun saveMessage(
         platform: String,
         conversationKey: String,
         displayName: String,
+        handle: String,
         isGroup: Boolean,
         sender: String,
         content: String,
@@ -183,38 +183,29 @@ class GhostNotificationListener : NotificationListenerService() {
     ) {
         if (content.isBlank()) return
 
-        Log.d(TAG, "saveMessage: starting for $platform")
         val classification = MessageClassifier.classify(content)
 
         serviceScope.launch {
             val db = AppDatabase.getInstance(applicationContext)
 
-            var conversation = db.conversationDao().findByContact(conversationKey)
+            val needsReply = classification.requirement != ReplyRequirement.NO_REPLY_REQUIRED
+            val initialStatus = if (needsReply) "WAITING_FOR_REPLY" else "NEW"
 
-            if (conversation == null) {
-                val initialStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
-                    "NEW"
-                } else {
-                    "WAITING_FOR_REPLY"
-                }
-
-                db.conversationDao().insert(
-                    ConversationEntity(
-                        contactIdentifier = conversationKey,
-                        displayName = displayName,
-                        platform = platform.lowercase(),
-                        isGroup = isGroup,
-                        lastMessage = content,
-                        lastMessageTime = timestamp,
-                        status = initialStatus,
-                        priority = classification.priority.name
-                    )
+            // Atomic get-or-create: no insert/read race between concurrent notifications.
+            val currentConversation = db.conversationDao().getOrCreate(
+                ConversationEntity(
+                    contactIdentifier = conversationKey,
+                    displayName = displayName,
+                    handle = handle,
+                    platform = platform.lowercase(),
+                    isGroup = isGroup,
+                    lastMessage = content,
+                    lastMessageTime = timestamp,
+                    awaitingSince = if (needsReply) timestamp else 0L,
+                    status = initialStatus,
+                    priority = classification.priority.name,
                 )
-                conversation = db.conversationDao().findByContact(conversationKey)
-                Log.d(TAG, "Created new conversation: id=${conversation?.id}, priority=${classification.priority.name}")
-            }
-
-            val currentConversation = conversation ?: return@launch
+            )
 
             val rowId = db.messageDao().insert(
                 MessageEntity(
@@ -224,59 +215,62 @@ class GhostNotificationListener : NotificationListenerService() {
                     timestamp = timestamp,
                     platform = platform.lowercase(),
                     requiresReply = classification.requirement.name,
-                    priority = classification.priority.name
+                    priority = classification.priority.name,
                 )
             )
 
             if (rowId == -1L) {
-                Log.d(TAG, "Duplicate skipped: $sender | $content")
-            } else {
-                Log.d(TAG, "Saved to DB: [$platform] $sender | $content | ${classification.requirement} (${classification.priority}) (conversation: ${currentConversation.id})")
+                GLog.d(TAG) { "Duplicate skipped for conv=${currentConversation.id}" }
+                return@launch
+            }
 
-                // Update conversation summary only for NEW messages
-                val isLatest = timestamp >= currentConversation.lastMessageTime
-                
-                val updatedStatus = if (classification.requirement == ReplyRequirement.NO_REPLY_REQUIRED) {
-                    currentConversation.status
-                } else {
-                    "WAITING_FOR_REPLY"
-                }
+            GLog.d(TAG) {
+                "Saved: [$platform] conv=${currentConversation.id} " +
+                    "${classification.requirement}/${classification.priority}"
+            }
 
-                val oldPriority = currentConversation.priority
-                val latestPriority = classification.priority.name
-                val finalPriority = if (isLatest) latestPriority else oldPriority
+            val isLatest = timestamp >= currentConversation.lastMessageTime
 
-                Log.d(TAG, "Updating conversation ${currentConversation.id} priority: " +
-                        "old=$oldPriority, message=$latestPriority, final=$finalPriority (isLatest=$isLatest)")
+            // Start the clock only on the FIRST unanswered message.
+            val newAwaitingSince = when {
+                !needsReply -> currentConversation.awaitingSince
+                currentConversation.awaitingSince == 0L -> timestamp
+                else -> minOf(currentConversation.awaitingSince, timestamp)
+            }
 
-                db.conversationDao().update(
-                    currentConversation.copy(
-                        lastMessage = if (isLatest) content else currentConversation.lastMessage,
-                        lastMessageTime = if (isLatest) timestamp else currentConversation.lastMessageTime,
-                        status = updatedStatus,
-                        priority = finalPriority,
-                        updatedAt = System.currentTimeMillis()
-                    )
+            val updatedStatus = if (needsReply) "WAITING_FOR_REPLY" else currentConversation.status
+
+            db.conversationDao().update(
+                currentConversation.copy(
+                    lastMessage = if (isLatest) content else currentConversation.lastMessage,
+                    lastMessageTime = if (isLatest) timestamp else currentConversation.lastMessageTime,
+                    handle = currentConversation.handle.ifEmpty { handle },
+                    awaitingSince = newAwaitingSince,
+                    status = updatedStatus,
+                    priority = if (isLatest) classification.priority.name else currentConversation.priority,
+                    updatedAt = System.currentTimeMillis(),
                 )
+            )
 
-                // Update "New Messages" notification
+            // Only surface a Ghost notification for messages that actually need
+            // you — otherwise Ghost becomes the second inbox it promised not to be.
+            if (needsReply) {
                 newMessagesCount++
                 newMessagesPlatforms.add(platform)
-                Log.d(TAG, "Triggering Ghost notification for new message. Session count: $newMessagesCount")
-                GhostNotificationManager.showNewMessages(applicationContext, newMessagesCount, newMessagesPlatforms)
+                GhostNotificationManager.showNewMessages(
+                    applicationContext, newMessagesCount, newMessagesPlatforms
+                )
             }
         }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        super.onNotificationRemoved(sbn)
-        // If a notification for a supported app is cleared by the user, we could potentially reset our new messages count
-        // but the requirements say "Ghost should not become another notification inbox".
-        // For now, we'll keep the count until the user opens Ghost.
+        // Counts persist until the user opens Ghost; clearing the source app's
+        // notification does not mean the message was handled.
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d(TAG, "Ghost is now listening for notifications ✅")
+        GLog.d(TAG) { "Ghost is now listening for notifications" }
     }
 }
